@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import os
+from pathlib import Path
 import threading
 import time
 import urllib.error
@@ -80,6 +81,8 @@ TARGET_CONFIG = _initial_config("target")
 
 _config_lock = threading.Lock()
 tracker = TokenTracker()
+_debug_lock = threading.Lock()
+_debug_counter = 0
 
 
 def _chat_url(config: QwenChatConfig) -> str:
@@ -115,6 +118,44 @@ def _usage_from_payload(payload: dict[str, Any]) -> dict[str, int]:
         "completion_tokens": completion_tokens,
         "total_tokens": total_tokens,
     }
+
+
+def _write_debug_response(
+    *,
+    payload: dict[str, Any],
+    data: dict[str, Any],
+    role: str,
+    stage: str,
+) -> None:
+    global _debug_counter
+    debug_root = os.environ.get("QWEN_CHAT_DEBUG_DIR", "outputs/qwen_chat_debug")
+    try:
+        root = Path(debug_root)
+        root.mkdir(parents=True, exist_ok=True)
+        with _debug_lock:
+            _debug_counter += 1
+            idx = _debug_counter
+        safe_payload = dict(payload)
+        if "messages" in safe_payload:
+            safe_payload["messages"] = [
+                {
+                    "role": msg.get("role"),
+                    "content_chars": len(str(msg.get("content") or "")),
+                }
+                if isinstance(msg, dict)
+                else {"content_chars": len(str(msg))}
+                for msg in safe_payload.get("messages") or []
+            ]
+        record = {
+            "role": role,
+            "stage": stage,
+            "payload": safe_payload,
+            "response": data,
+        }
+        path = root / f"{int(time.time())}_{idx:04d}_{role}_{stage}.json"
+        path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        return
 
 
 def _compat_message_from_payload(message: dict[str, Any], choice: dict[str, Any]) -> CompatAssistantMessage:
@@ -212,6 +253,8 @@ def _chat_messages_impl(
             text = message.get("content") or ""
             if not isinstance(text, str):
                 text = json.dumps(text, ensure_ascii=False)
+            if not text.strip() or choice0.get("finish_reason") == "length":
+                _write_debug_response(payload=payload, data=data, role=role, stage=stage)
             usage_info = _usage_from_payload(data)
             tracker.record(stage, usage_info["prompt_tokens"], usage_info["completion_tokens"])
             if return_message:

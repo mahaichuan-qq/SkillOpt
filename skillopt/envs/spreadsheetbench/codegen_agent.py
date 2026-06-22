@@ -377,11 +377,15 @@ def _chat_call(
         return ""
     else:
         # Chat Completions API — no tools
+        is_deepseek = get_target_backend() == "qwen_chat" and "deepseek" in deployment.lower()
         kwargs = {
             "model": deployment,
             "messages": messages,
-            "max_completion_tokens": max_output_tokens,
         }
+        if is_deepseek:
+            kwargs["max_tokens"] = max_output_tokens
+        else:
+            kwargs["max_completion_tokens"] = max_output_tokens
         if reasoning_effort is not None:
             kwargs["reasoning_effort"] = reasoning_effort
         resp = _llm_call_with_retry(lambda timeout: client.chat.completions.create(

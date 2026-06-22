@@ -48,6 +48,17 @@ from skillopt.prompts import load_prompt
 from skillopt.utils import extract_json
 
 
+def _read_text_file(path: str) -> str:
+    for encoding in ("utf-8", "utf-8-sig", "gb18030"):
+        try:
+            with open(path, encoding=encoding) as f:
+                return f.read()
+        except UnicodeDecodeError:
+            continue
+    with open(path, encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
 # ── Trajectory formatting ────────────────────────────────────────────────────
 
 
@@ -141,7 +152,7 @@ def fmt_minibatch_trajectories(
         conv_path = os.path.join(prediction_dir, tid, "conversation.json")
         if not os.path.exists(conv_path):
             continue
-        with open(conv_path) as f:
+        with open(conv_path, encoding="utf-8") as f:
             conversation = json.load(f)
         if not conversation:
             continue
@@ -169,8 +180,7 @@ def fmt_minibatch_trajectories(
         if not target_prompt:
             prompt_path = os.path.join(prediction_dir, tid, "target_system_prompt.txt")
             if os.path.exists(prompt_path):
-                with open(prompt_path) as f:
-                    target_prompt = f.read()
+                target_prompt = _read_text_file(prompt_path)
         if target_prompt:
             header += (
                 f"\n#### Target System Prompt\n"
@@ -181,8 +191,7 @@ def fmt_minibatch_trajectories(
         if not user_prompt:
             user_prompt_path = os.path.join(prediction_dir, tid, "target_user_prompt.txt")
             if os.path.exists(user_prompt_path):
-                with open(user_prompt_path) as f:
-                    user_prompt = f.read()
+                user_prompt = _read_text_file(user_prompt_path)
         if user_prompt:
             header += (
                 f"\n#### Target User Prompt\n"
@@ -194,8 +203,7 @@ def fmt_minibatch_trajectories(
             if not codex_trace_summary:
                 codex_trace_summary_path = os.path.join(prediction_dir, tid, "codex_trace_summary.txt")
                 if os.path.exists(codex_trace_summary_path):
-                    with open(codex_trace_summary_path) as f:
-                        codex_trace_summary = f.read()
+                    codex_trace_summary = _read_text_file(codex_trace_summary_path)
             if codex_trace_summary:
                 header += (
                     f"\n#### Codex Trace Summary\n"
@@ -213,8 +221,7 @@ def fmt_minibatch_trajectories(
         if not preview:
             preview_path = os.path.join(prediction_dir, tid, "spreadsheet_preview.txt")
             if os.path.exists(preview_path):
-                with open(preview_path) as f:
-                    preview = f.read()
+                preview = _read_text_file(preview_path)
         if preview:
             header += (
                 f"\n#### Spreadsheet Preview\n"
@@ -560,7 +567,7 @@ def run_minibatch_reflect(
     for idx, batch in enumerate(fail_batches):
         path = os.path.join(patches_dir, f"minibatch_fail_{idx:03d}.json")
         if os.path.exists(path):
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 raw_patches.append(json.load(f))
         else:
             pending_fail.append((idx, batch))
@@ -569,7 +576,7 @@ def run_minibatch_reflect(
     for idx, batch in enumerate(succ_batches):
         path = os.path.join(patches_dir, f"minibatch_succ_{idx:03d}.json")
         if os.path.exists(path):
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 raw_patches.append(json.load(f))
         else:
             pending_succ.append((idx, batch))
@@ -623,7 +630,7 @@ def run_minibatch_reflect(
             tag, patch = fut.result()
             if patch:
                 path = os.path.join(patches_dir, f"{tag}.json")
-                with open(path, "w") as f:
+                with open(path, "w", encoding="utf-8") as f:
                     json.dump(patch, f, ensure_ascii=False, indent=2)
                 raw_patches.append(patch)
             n_edits = len(get_payload_items(patch.get("patch", {}) if patch else {}, update_mode))

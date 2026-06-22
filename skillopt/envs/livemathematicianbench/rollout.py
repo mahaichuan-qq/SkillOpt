@@ -11,6 +11,11 @@ from skillopt.model import chat_target, get_target_backend, is_target_exec_backe
 from skillopt.model.codex_harness import prepare_workspace, render_skill_md, run_target_exec
 from skillopt.prompts import load_prompt
 
+
+def _safe_path_id(item_id: str) -> str:
+    return "".join(ch if ch not in '<>:"/\\|?*' else "_" for ch in str(item_id))
+
+
 def _build_system(skill_content: str) -> str:
     if skill_content.strip():
         skill_section = f"## Skill\n{skill_content.strip()}\n\n"
@@ -141,7 +146,7 @@ def process_one(
     }
 
     try:
-        pred_dir = os.path.join(out_root, "predictions", item_id)
+        pred_dir = os.path.join(out_root, "predictions", _safe_path_id(item_id))
         os.makedirs(pred_dir, exist_ok=True)
         llm_timeout = int(exec_timeout) if exec_timeout and int(exec_timeout) > 0 else None
 
@@ -200,7 +205,7 @@ def process_one(
                 f"Exact Match: {eval_result['em']}"
             )
             conversation.append({"role": "system", "content": eval_detail})
-            with open(os.path.join(pred_dir, "conversation.json"), "w") as f:
+            with open(os.path.join(pred_dir, "conversation.json"), "w", encoding="utf-8") as f:
                 json.dump(conversation, f, ensure_ascii=False, indent=2)
             return result
 
@@ -278,7 +283,7 @@ def process_one(
         )
         conversation.append({"role": "system", "content": eval_detail})
 
-        with open(os.path.join(pred_dir, "conversation.json"), "w") as f:
+        with open(os.path.join(pred_dir, "conversation.json"), "w", encoding="utf-8") as f:
             json.dump(conversation, f, ensure_ascii=False, indent=2)
 
     except Exception as e:  # noqa: BLE001
@@ -315,7 +320,7 @@ def run_batch(
     done_ids: set[str] = set()
     existing: list[dict] = []
     if os.path.exists(results_path):
-        with open(results_path) as f:
+        with open(results_path, encoding="utf-8") as f:
             for line in f:
                 try:
                     r = json.loads(line)
@@ -378,7 +383,7 @@ def run_batch(
         res["fail_reason"] = f"error: {type(exc).__name__}: {exc}"
         return res
 
-    with open(results_path, "a") as outf:
+    with open(results_path, "a", encoding="utf-8") as outf:
         ex = ThreadPoolExecutor(max_workers=workers)
         try:
             futs = {

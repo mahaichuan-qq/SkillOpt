@@ -1,0 +1,16 @@
+_base_: default.yaml
+
+train:
+  num_epochs: 1
+  train_size: 5
+  batch_size: 5
+
+evaluation:
+  sel_env_num: 3
+  test_env_num: 5
+  eval_test: true
+
+env:
+  split_dir: data/table1_smoke/docvqa
+  out_root: outputs/docvqa_smoke
+  workers: 16

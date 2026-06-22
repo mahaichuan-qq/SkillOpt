@@ -2,11 +2,11 @@
 # Environment configs should inherit via: _base_: default.yaml
 
 model:
-  backend: azure_openai
-  optimizer: gpt-5.5
-  target: gpt-5.5
-  optimizer_backend: openai_chat
-  target_backend: openai_chat
+  backend: qwen_chat
+  optimizer: deepseek-v4-flash
+  target: deepseek-v4-flash
+  optimizer_backend: qwen_chat
+  target_backend: qwen_chat
   reasoning_effort: medium
   rewrite_reasoning_effort: ""
   rewrite_max_completion_tokens: 64000
@@ -43,6 +43,11 @@ model:
   target_azure_openai_auth_mode: ""           # empty → fall back to TARGET_AZURE_OPENAI_AUTH_MODE env, then shared
   target_azure_openai_ad_scope: "https://cognitiveservices.azure.com/.default"
   target_azure_openai_managed_identity_client_id: ""
+
+  # OpenAI-compatible chat backend settings (qwen_chat)
+  qwen_chat_base_url: https://api.deepseek.com
+  qwen_chat_api_key: sk-ac506e2c25d34ba5820ae4bebdbd1145
+  qwen_chat_max_tokens: 64000
 
   # MiniMax backend settings (minimax_chat target)
   minimax_base_url: ""          # https://api.minimax.io/v1 if blank
