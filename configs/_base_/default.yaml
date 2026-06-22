@@ -48,6 +48,7 @@ model:
   qwen_chat_base_url: https://api.deepseek.com
   qwen_chat_api_key: sk-ac506e2c25d34ba5820ae4bebdbd1145
   qwen_chat_max_tokens: 64000
+  qwen_chat_stream: true
 
   # MiniMax backend settings (minimax_chat target)
   minimax_base_url: ""          # https://api.minimax.io/v1 if blank

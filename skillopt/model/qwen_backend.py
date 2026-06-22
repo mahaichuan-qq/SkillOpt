@@ -28,6 +28,7 @@ class QwenChatConfig:
     max_tokens: int
     temperature: float | None
     enable_thinking: bool
+    stream: bool
     deployment: str
 
 
@@ -67,6 +68,7 @@ def _initial_config(role: str) -> QwenChatConfig:
         max_tokens=_parse_int(_role_env(role, "MAX_TOKENS", "8000"), 8000),
         temperature=_parse_optional_float(_role_env(role, "TEMPERATURE", "0.7")),
         enable_thinking=_parse_bool(_role_env(role, "ENABLE_THINKING", "false")),
+        stream=_parse_bool(_role_env(role, "STREAM", "false")),
         deployment=(
             os.environ.get(f"{role_upper}_QWEN_CHAT_MODEL")
             or os.environ.get("QWEN_CHAT_MODEL")
@@ -90,6 +92,102 @@ def _chat_url(config: QwenChatConfig) -> str:
     if base.endswith("/chat/completions"):
         return base
     return f"{base}/chat/completions"
+
+
+def _merge_tool_call_delta(tool_calls_by_index: dict[int, dict[str, Any]], delta: dict[str, Any]) -> None:
+    idx = int(delta.get("index") or 0)
+    current = tool_calls_by_index.setdefault(
+        idx,
+        {
+            "id": "",
+            "type": "function",
+            "function": {"name": "", "arguments": ""},
+        },
+    )
+    if delta.get("id"):
+        current["id"] = str(delta["id"])
+    if delta.get("type"):
+        current["type"] = str(delta["type"])
+    function = delta.get("function") or {}
+    if function.get("name"):
+        current["function"]["name"] += str(function["name"])
+    if function.get("arguments"):
+        current["function"]["arguments"] += str(function["arguments"])
+
+
+def _parse_stream_response(raw: str) -> dict[str, Any]:
+    content_parts: list[str] = []
+    reasoning_parts: list[str] = []
+    tool_calls_by_index: dict[int, dict[str, Any]] = {}
+    finish_reason = None
+    usage: dict[str, Any] = {}
+    response_id = None
+    model = None
+    created = None
+
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line.startswith(":"):
+            continue
+        if not line.startswith("data:"):
+            continue
+        payload = line[len("data:"):].strip()
+        if not payload or payload == "[DONE]":
+            continue
+        try:
+            chunk = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        response_id = response_id or chunk.get("id")
+        model = model or chunk.get("model")
+        created = created or chunk.get("created")
+        if chunk.get("usage"):
+            usage = chunk["usage"]
+        choices = chunk.get("choices") or []
+        if not choices:
+            continue
+        choice = choices[0]
+        finish_reason = choice.get("finish_reason") or finish_reason
+        delta = choice.get("delta") or choice.get("message") or {}
+        content = delta.get("content")
+        if isinstance(content, str):
+            content_parts.append(content)
+        elif content:
+            content_parts.append(json.dumps(content, ensure_ascii=False))
+        reasoning = delta.get("reasoning_content")
+        if isinstance(reasoning, str):
+            reasoning_parts.append(reasoning)
+        elif reasoning:
+            reasoning_parts.append(json.dumps(reasoning, ensure_ascii=False))
+        for tool_call in delta.get("tool_calls") or []:
+            if isinstance(tool_call, dict):
+                _merge_tool_call_delta(tool_calls_by_index, tool_call)
+
+    tool_calls = [
+        call for _, call in sorted(tool_calls_by_index.items(), key=lambda item: item[0])
+    ]
+    message: dict[str, Any] = {
+        "role": "assistant",
+        "content": "".join(content_parts),
+    }
+    if reasoning_parts:
+        message["reasoning_content"] = "".join(reasoning_parts)
+    if tool_calls:
+        message["tool_calls"] = tool_calls
+    return {
+        "id": response_id,
+        "object": "chat.completion",
+        "created": created,
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "message": message,
+                "finish_reason": finish_reason,
+            }
+        ],
+        "usage": usage,
+    }
 
 
 def _json_safe(value: Any) -> Any:
@@ -207,6 +305,8 @@ def _post_chat_completion(
         raise RuntimeError(f"Qwen chat API returned HTTP {e.code}: {body}") from e
     except urllib.error.URLError as e:
         raise RuntimeError(f"Qwen chat API request failed: {e}") from e
+    if config.stream:
+        return _parse_stream_response(raw)
     try:
         return json.loads(raw)
     except json.JSONDecodeError as e:
@@ -234,6 +334,8 @@ def _chat_messages_impl(
     }
     if config.enable_thinking:
         payload["chat_template_kwargs"] = {"enable_thinking": True}
+    if config.stream:
+        payload["stream"] = True
     if config.temperature is not None:
         payload["temperature"] = config.temperature
     if tools:
@@ -253,7 +355,9 @@ def _chat_messages_impl(
             text = message.get("content") or ""
             if not isinstance(text, str):
                 text = json.dumps(text, ensure_ascii=False)
-            if not text.strip() or choice0.get("finish_reason") == "length":
+            if choice0.get("finish_reason") == "length" or (
+                not text.strip() and not (message.get("tool_calls") or [])
+            ):
                 _write_debug_response(payload=payload, data=data, role=role, stage=stage)
             usage_info = _usage_from_payload(data)
             tracker.record(stage, usage_info["prompt_tokens"], usage_info["completion_tokens"])
@@ -274,18 +378,21 @@ def configure_qwen_chat(
     timeout_seconds: float | str | None = None,
     max_tokens: int | str | None = None,
     enable_thinking: bool | str | None = None,
+    stream: bool | str | None = None,
     optimizer_base_url: str | None = None,
     optimizer_api_key: str | None = None,
     optimizer_temperature: float | str | None = None,
     optimizer_timeout_seconds: float | str | None = None,
     optimizer_max_tokens: int | str | None = None,
     optimizer_enable_thinking: bool | str | None = None,
+    optimizer_stream: bool | str | None = None,
     target_base_url: str | None = None,
     target_api_key: str | None = None,
     target_temperature: float | str | None = None,
     target_timeout_seconds: float | str | None = None,
     target_max_tokens: int | str | None = None,
     target_enable_thinking: bool | str | None = None,
+    target_stream: bool | str | None = None,
 ) -> None:
     with _config_lock:
         if base_url is not None:
@@ -302,6 +409,8 @@ def configure_qwen_chat(
             os.environ["QWEN_CHAT_ENABLE_THINKING"] = (
                 "true" if _parse_bool(enable_thinking) else "false"
             )
+        if stream is not None:
+            os.environ["QWEN_CHAT_STREAM"] = "true" if _parse_bool(stream) else "false"
         _update_config(
             OPTIMIZER_CONFIG,
             "optimizer",
@@ -323,6 +432,7 @@ def configure_qwen_chat(
                 if optimizer_enable_thinking is not None
                 else enable_thinking
             ),
+            stream=optimizer_stream if optimizer_stream is not None else stream,
         )
         _update_config(
             TARGET_CONFIG,
@@ -341,6 +451,7 @@ def configure_qwen_chat(
                 if target_enable_thinking is not None
                 else enable_thinking
             ),
+            stream=target_stream if target_stream is not None else stream,
         )
 
 
@@ -354,6 +465,7 @@ def _update_config(
     timeout_seconds: float | str | None = None,
     max_tokens: int | str | None = None,
     enable_thinking: bool | str | None = None,
+    stream: bool | str | None = None,
 ) -> None:
     env_prefix = role.upper()
     if base_url is not None:
@@ -376,6 +488,11 @@ def _update_config(
         config.enable_thinking = _parse_bool(enable_thinking)
         os.environ[f"{env_prefix}_QWEN_CHAT_ENABLE_THINKING"] = (
             "true" if config.enable_thinking else "false"
+        )
+    if stream is not None:
+        config.stream = _parse_bool(stream)
+        os.environ[f"{env_prefix}_QWEN_CHAT_STREAM"] = (
+            "true" if config.stream else "false"
         )
 
 
