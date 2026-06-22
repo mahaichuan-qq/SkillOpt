@@ -232,11 +232,11 @@ def process_one(
             result["agent_ok"] = True
             result["n_turns"] = len(conversation)
 
-            with open(os.path.join(pred_dir, "target_system_prompt.txt"), "w") as f:
+            with open(os.path.join(pred_dir, "target_system_prompt.txt"), "w", encoding="utf-8") as f:
                 f.write(system)
-            with open(os.path.join(pred_dir, "target_user_prompt.txt"), "w") as f:
+            with open(os.path.join(pred_dir, "target_user_prompt.txt"), "w", encoding="utf-8") as f:
                 f.write(user)
-            with open(os.path.join(pred_dir, "conversation.json"), "w") as f:
+            with open(os.path.join(pred_dir, "conversation.json"), "w", encoding="utf-8") as f:
                 json.dump(conversation, f, ensure_ascii=False, indent=2)
 
             eval_result = evaluate(response, gold_answers)
@@ -260,7 +260,7 @@ def process_one(
                 f"F1: {eval_result['f1']:.4f}"
             )
             conversation.append({"role": "system", "content": eval_detail})
-            with open(os.path.join(pred_dir, "conversation.json"), "w") as f:
+            with open(os.path.join(pred_dir, "conversation.json"), "w", encoding="utf-8") as f:
                 json.dump(conversation, f, ensure_ascii=False, indent=2)
             return result
 
@@ -309,11 +309,11 @@ def process_one(
         result["n_turns"] = len(conversation)
 
         # Save conversation
-        with open(os.path.join(pred_dir, "target_system_prompt.txt"), "w") as f:
+        with open(os.path.join(pred_dir, "target_system_prompt.txt"), "w", encoding="utf-8") as f:
             f.write(system)
-        with open(os.path.join(pred_dir, "target_user_prompt.txt"), "w") as f:
+        with open(os.path.join(pred_dir, "target_user_prompt.txt"), "w", encoding="utf-8") as f:
             f.write(user)
-        with open(os.path.join(pred_dir, "conversation.json"), "w") as f:
+        with open(os.path.join(pred_dir, "conversation.json"), "w", encoding="utf-8") as f:
             json.dump(conversation, f, ensure_ascii=False, indent=2)
 
         # Evaluate
@@ -345,7 +345,7 @@ def process_one(
             "content": eval_detail,
         })
         # Re-save enriched conversation
-        with open(os.path.join(pred_dir, "conversation.json"), "w") as f:
+        with open(os.path.join(pred_dir, "conversation.json"), "w", encoding="utf-8") as f:
             json.dump(conversation, f, ensure_ascii=False, indent=2)
 
     except Exception as e:  # noqa: BLE001
@@ -379,7 +379,7 @@ def run_batch(
     done_ids: set[str] = set()
     existing: list[dict] = []
     if os.path.exists(results_path):
-        with open(results_path) as f:
+        with open(results_path, encoding="utf-8") as f:
             for line in f:
                 try:
                     r = json.loads(line)
@@ -440,7 +440,7 @@ def run_batch(
             max_completion_tokens,
         )
 
-    with open(results_path, "a") as outf:
+    with open(results_path, "a", encoding="utf-8") as outf:
         ex = ThreadPoolExecutor(max_workers=workers)
         try:
             futs = {ex.submit(_run_one, it): it for it in pending}

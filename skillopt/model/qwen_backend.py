@@ -313,6 +313,15 @@ def _post_chat_completion(
         raise RuntimeError(f"Qwen chat API returned non-JSON response: {raw[:1000]}") from e
 
 
+def _retry_sleep_seconds(err: Exception, attempt: int) -> float:
+    msg = str(err)
+    if "HTTP 429" in msg:
+        if "1 minute" in msg or "times:1 minute" in msg:
+            return 65.0
+        return 30.0
+    return float(min(2 ** attempt, 30))
+
+
 def _chat_messages_impl(
     messages: list[dict[str, Any]],
     max_completion_tokens: int,
@@ -366,7 +375,8 @@ def _chat_messages_impl(
             return text, usage_info
         except Exception as e:  # noqa: BLE001
             last_err = e
-            time.sleep(min(2 ** attempt, 30))
+            if attempt < retries - 1:
+                time.sleep(_retry_sleep_seconds(e, attempt))
     raise RuntimeError(f"Qwen chat call failed after {retries} retries: {last_err}")
 
 
