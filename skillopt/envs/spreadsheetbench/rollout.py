@@ -20,7 +20,6 @@ from concurrent.futures import (
     FIRST_COMPLETED,
     ThreadPoolExecutor,
     wait,
-    TimeoutError as FuturesTimeoutError,
 )
 
 import openpyxl
@@ -508,17 +507,6 @@ def run_spreadsheet_batch(
 
     t0 = time.time()
     results = list(existing)
-    started_at: dict[str, float] = {}
-
-    def _timeout_result(item: dict) -> dict:
-        return {
-            "id": str(item["id"]),
-            "ok": False,
-            "phase": "timeout",
-            "fail_reason": f"task-timeout-{task_timeout}s",
-            "n_cases": 0, "n_pass": 0, "soft": 0.0, "hard": 0,
-            "n_turns": 0, "cases": [], "error": "timeout",
-        }
 
     def _error_result(item: dict, exc: Exception) -> dict:
         return {
@@ -531,7 +519,6 @@ def run_spreadsheet_batch(
         }
 
     def _run_one(it: dict) -> dict:
-        started_at[str(it["id"])] = time.time()
         return process_one(
             it,
             data_root,
@@ -551,19 +538,11 @@ def run_spreadsheet_batch(
         finished = 0
         while pending_futs:
             done, _ = wait(pending_futs, timeout=5, return_when=FIRST_COMPLETED)
-            now = time.time()
-            timed_out = [
-                fut for fut in pending_futs - done
-                if str(futs[fut]["id"]) in started_at
-                and now - started_at[str(futs[fut]["id"])] >= task_timeout
-            ]
             for fut in done:
                 pending_futs.remove(fut)
                 item = futs[fut]
                 try:
                     res = fut.result()
-                except FuturesTimeoutError:
-                    res = _timeout_result(item)
                 except Exception as e:  # noqa: BLE001
                     res = _error_result(item, e)
                 results.append(res)
@@ -576,21 +555,8 @@ def run_spreadsheet_batch(
                     f"cases={res.get('n_pass', 0)}/{res.get('n_cases', 0)}  "
                     f"dt={dt:.0f}s"
                 )
-            for fut in timed_out:
-                pending_futs.remove(fut)
-                res = _timeout_result(futs[fut])
-                results.append(res)
-                finished += 1
-                status = "TIMEOUT"
-                dt = time.time() - t0
-                print(
-                    f"    {finished}/{len(pending)} id={res['id']:<10} {status}  "
-                    f"turns={res.get('n_turns', 0):<3} "
-                    f"cases={res.get('n_pass', 0)}/{res.get('n_cases', 0)}  "
-                    f"dt={dt:.0f}s"
-                )
     finally:
-        ex.shutdown(wait=False, cancel_futures=True)
+        ex.shutdown(wait=True)
 
     return results
 
@@ -748,6 +714,18 @@ def process_one_codegen(
         except Exception as e:  # noqa: BLE001
             result["fail_reason"] = f"llm-call-failed: {type(e).__name__}: {e}"
             result["error"] = traceback.format_exc()
+            return result
+
+        if agent_result.get("phase") == "timeout":
+            result["phase"] = "timeout"
+            result["fail_reason"] = agent_result.get("fail_reason", "task-deadline-exceeded")
+            result["error"] = result["fail_reason"]
+            result["n_turns"] = int(agent_result.get("n_turns", 0) or 0)
+            if agent_result.get("conversation"):
+                with open(
+                    os.path.join(task_out_dir, "conversation.json"), "w", encoding="utf-8"
+                ) as f:
+                    json.dump(agent_result["conversation"], f, ensure_ascii=False, indent=2)
             return result
 
         result["llm_ok"] = True
@@ -914,10 +892,7 @@ def run_spreadsheet_batch_codegen(
     t0 = time.time()
     results = list(existing)
 
-    started_at: dict[str, float] = {}
-
     def _run_one(it: dict) -> dict:
-        started_at[str(it["id"])] = time.time()
         return process_one_codegen(
             it,
             data_root,
@@ -932,18 +907,6 @@ def run_spreadsheet_batch_codegen(
             diagnostic_instruction,
             (diagnostic_trace_context_by_id or {}).get(str(it["id"]), ""),
         )
-
-    def _timeout_result(item: dict) -> dict:
-        return {
-            "id": str(item["id"]),
-            "ok": False,
-            "instruction_type": item.get("instruction_type", ""),
-            "task_type": "other",
-            "phase": "timeout",
-            "fail_reason": f"task-timeout-{task_timeout}s",
-            "n_cases": 0, "n_pass": 0, "soft": 0.0, "hard": 0,
-            "n_turns": 0, "cases": [], "error": "timeout",
-        }
 
     def _error_result(item: dict, e: Exception) -> dict:
         return {
@@ -975,29 +938,16 @@ def run_spreadsheet_batch_codegen(
         finished = 0
         while pending_futs:
             done, _ = wait(pending_futs, timeout=5, return_when=FIRST_COMPLETED)
-            now = time.time()
-            timed_out = [] if no_task_timeout else [
-                fut for fut in pending_futs - done
-                if str(futs[fut]["id"]) in started_at
-                and now - started_at[str(futs[fut]["id"])] >= task_timeout
-            ]
             for fut in done:
                 pending_futs.remove(fut)
                 item = futs[fut]
                 try:
                     res = fut.result()
-                except FuturesTimeoutError:
-                    res = _timeout_result(item)
                 except Exception as e:  # noqa: BLE001
                     res = _error_result(item, e)
                 finished += 1
                 _record(res, finished)
-            for fut in timed_out:
-                pending_futs.remove(fut)
-                fut.cancel()
-                finished += 1
-                _record(_timeout_result(futs[fut]), finished)
     finally:
-        ex.shutdown(wait=False, cancel_futures=True)
+        ex.shutdown(wait=True)
 
     return results

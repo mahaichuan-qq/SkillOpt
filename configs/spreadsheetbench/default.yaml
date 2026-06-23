@@ -11,6 +11,7 @@ train:
 gradient:
   minibatch_size: 8
   merge_batch_size: 8
+  analyst_workers: 4
 
 optimizer:
   learning_rate: 4
@@ -31,4 +32,4 @@ env:
   max_turns: 30
   max_completion_tokens: 16384
   exec_timeout: 600
-  workers: 24
+  workers: 6

@@ -352,7 +352,7 @@ def _chat_call(
     response, _ = chat_target_messages(
         messages=messages,
         max_completion_tokens=max_output_tokens,
-        retries=5,
+        retries=3,
         stage="rollout",
         timeout=llm_timeout,
     )
@@ -618,6 +618,7 @@ def run_multi(
     conversation: list[dict] = []
     code = ""
     raw = ""
+    deadline_expired = False
 
     for turn in range(max_turns):
         if deadline is None:
@@ -625,7 +626,7 @@ def run_multi(
         else:
             remaining = deadline - time.time()
             if remaining <= 10:
-                # Not enough time for another round
+                deadline_expired = True
                 break
             effective_timeout = min(llm_timeout or int(remaining), int(remaining))
         raw = _chat_call(None, deployment, messages, max_output_tokens, llm_timeout=effective_timeout)
@@ -681,10 +682,23 @@ def run_multi(
         messages.append({"role": "user", "content": feedback})
         conversation.append({"role": "user", "content": feedback})
 
+    assistant_turns = len([m for m in conversation if m["role"] == "assistant"])
+    if deadline_expired and not raw.strip() and not code.strip():
+        return {
+            "phase": "timeout",
+            "fail_reason": "task-deadline-exceeded",
+            "code": "",
+            "raw": "",
+            "n_turns": assistant_turns,
+            "conversation": conversation,
+            "target_system_prompt": system,
+            "target_user_prompt": user,
+        }
+
     return {
         "code": code,
         "raw": raw,
-        "n_turns": turn + 1,
+        "n_turns": assistant_turns,
         "conversation": conversation,
         "target_system_prompt": system,
         "target_user_prompt": user,
